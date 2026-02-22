@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LLM Council</title>
+  <link rel="stylesheet" href="popup.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+  <!-- Header -->
+  <header class="header">
+    <div class="header-brand">
+      <span class="header-icon">🏛</span>
+      <h1 class="header-title">LLM Council</h1>
+    </div>
+    <span class="header-badge">v1.0</span>
+  </header>
+
+  <main class="main">
+    <!-- Prompt Section -->
+    <section class="section prompt-section">
+      <label class="section-label" for="prompt-input">Your Prompt</label>
+      <textarea
+        id="prompt-input"
+        class="prompt-textarea"
+        placeholder="Enter your prompt here... The council will deliberate."
+        rows="4"
+      ></textarea>
+    </section>
+
+    <!-- Council Models Section -->
+    <section class="section">
+      <div class="section-header">
+        <label class="section-label">Council Models</label>
+        <span class="section-hint" id="council-count">Select 2–4</span>
+      </div>
+      <div class="model-grid" id="council-grid">
+        <!-- Populated by JS -->
+      </div>
+    </section>
+
+    <!-- Judge Section -->
+    <section class="section">
+      <div class="section-header">
+        <label class="section-label">Judge Model</label>
+        <span class="judge-status" id="judge-status"></span>
+      </div>
+      <select id="judge-select" class="judge-dropdown">
+        <!-- Populated by JS -->
+      </select>
+
+      <!-- Judge Account Settings -->
+      <div class="judge-settings" id="judge-settings">
+        <div class="settings-header" id="settings-toggle">
+          <span class="settings-icon">🔒</span>
+          <span>Judge Account Settings</span>
+          <span class="settings-chevron" id="settings-chevron">▼</span>
+        </div>
+        <div class="settings-body" id="settings-body">
+          <div class="radio-group">
+            <label class="radio-option">
+              <input type="radio" name="judge-mode" value="same-session">
+              <span class="radio-label">Same session (default)</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="judge-mode" value="incognito" checked>
+              <span class="radio-label">Open in Incognito</span>
+            </label>
+            <label class="radio-option">
+              <input type="radio" name="judge-mode" value="separate-window">
+              <span class="radio-label">Open in Separate Window</span>
+            </label>
+          </div>
+          <button class="btn btn-secondary" id="btn-reauth">
+            🔄 Re-authenticate Judge Account
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Ask Council Button -->
+    <button class="btn btn-primary" id="btn-ask-council" disabled>
+      <span class="btn-icon">🚀</span>
+      <span class="btn-text">Ask Council</span>
+    </button>
+
+    <!-- Status Bar -->
+    <div class="status-bar" id="status-bar">
+      <div class="status-indicator" id="status-indicator"></div>
+      <span class="status-text" id="status-text">Idle</span>
+    </div>
+
+    <!-- Results Panel (hidden until results arrive) -->
+    <section class="section results-panel" id="results-panel" style="display: none;">
+      <div class="results-header">
+        <span class="results-icon">📊</span>
+        <h2 class="results-title">Evaluation Results</h2>
+      </div>
+
+      <!-- Winner Banner -->
+      <div class="winner-banner" id="winner-banner" style="display: none;">
+        <span class="winner-trophy">🏆</span>
+        <div class="winner-info">
+          <span class="winner-label">Winner</span>
+          <span class="winner-name" id="winner-name"></span>
+          <span class="winner-score" id="winner-score"></span>
+        </div>
+      </div>
+
+      <!-- Score Cards Container -->
+      <div class="score-cards" id="score-cards">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Failed Models -->
+      <div class="failed-models" id="failed-models" style="display: none;">
+        <!-- Populated by JS -->
+      </div>
+
+      <!-- Raw Response Fallback -->
+      <div class="raw-response" id="raw-response" style="display: none;">
+        <h3>Raw Judge Response</h3>
+        <pre id="raw-response-text"></pre>
+      </div>
+
+      <!-- Actions -->
+      <div class="results-actions">
+        <button class="btn btn-secondary" id="btn-copy-results">
+          📋 Copy Results
+        </button>
+        <button class="btn btn-secondary" id="btn-re-evaluate">
+          🔄 Re-evaluate
+        </button>
+      </div>
+    </section>
+  </main>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
