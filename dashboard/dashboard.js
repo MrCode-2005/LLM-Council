@@ -270,52 +270,64 @@ async function handleSubmit() {
     showStatus('Waiting for sites to load...');
     await waitForIframeLoads(panels);
 
-    // Discover frames
+    // Discover frames — multiple rounds for slow-loading sites
     showStatus('Connecting to AI sites...');
-    await discoverFrameIds();
-
-    // Retry discovery after a short delay for slow-loading sites
-    await delay(2000);
-    await discoverFrameIds();
+    for (let round = 1; round <= 3; round++) {
+        await discoverFrameIds();
+        const undiscovered = Object.entries(iframePanels)
+            .filter(([, p]) => !p.frameId && !p.failed).length;
+        if (undiscovered === 0) break;
+        console.log(`[LLM Council] Discovery round ${round}: ${undiscovered} still unconnected`);
+        await delay(1500);
+    }
 
     // Log state
     for (const [k, p] of Object.entries(iframePanels)) {
         console.log(`[LLM Council] ${k}: frameId=${p.frameId}, failed=${p.failed}`);
     }
 
-    // ── Inject prompt into councils (skip failed ones) ──
-    showStatus('Sending prompt to council...');
+    // ── PARALLEL injection: send to ALL models at once ──
+    showStatus('Sending prompt to all models simultaneously...');
     const councilResponses = {};
-    let injectedCount = 0;
 
-    for (const cid of councilIds) {
+    // Build injection promises for all eligible models
+    const injectionPromises = councilIds.map(async (cid) => {
         const panel = iframePanels[cid];
 
-        // Skip if iframe failed to load or no frame discovered
         if (!panel || panel.failed) {
-            console.warn(`[LLM Council] Skipping ${cid} — iframe failed to load`);
+            console.warn(`[LLM Council] Skipping ${cid} — iframe failed`);
             updatePanelStatus(cid, '⛔ Skipped');
-            continue;
+            return { id: cid, success: false };
+        }
+
+        // If no frameId yet, try one last discovery just for this model
+        if (!panel.frameId) {
+            console.log(`[LLM Council] ${cid}: no frameId, retrying discovery...`);
+            await delay(2000);
+            await discoverFrameIds();
         }
 
         if (!panel.frameId) {
             console.warn(`[LLM Council] Skipping ${cid} — no frame connection`);
             updatePanelStatus(cid, '❌ No connection');
-            continue;
+            return { id: cid, success: false };
         }
 
         updatePanelStatus(cid, '⏳ Injecting...');
         try {
             await injectAndSend(panel.frameId, prompt);
             updatePanelStatus(cid, '⏳ Waiting...');
-            injectedCount++;
+            return { id: cid, success: true };
         } catch (e) {
             console.error(`[LLM Council] Inject failed for ${cid}:`, e);
             updatePanelStatus(cid, '❌ Failed');
+            return { id: cid, success: false };
         }
+    });
 
-        await delay(DEFAULTS.INJECTION_DELAY_MS);
-    }
+    // Fire ALL injections at once — no waiting between them
+    const results = await Promise.allSettled(injectionPromises);
+    const injectedCount = results.filter(r => r.status === 'fulfilled' && r.value?.success).length;
 
     if (injectedCount === 0) {
         showStatus('No models accepted the prompt. Check console for errors.');
