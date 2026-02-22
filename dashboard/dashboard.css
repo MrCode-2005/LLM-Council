@@ -28,7 +28,7 @@
     --radius-xl: 16px;
     --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     --sidebar-width: 220px;
-    --prompt-bar-height: 110px;
+    --prompt-bar-height: 100px;
 }
 
 * {
@@ -55,6 +55,17 @@ body {
     display: flex;
     flex-direction: column;
     flex-shrink: 0;
+    z-index: 10;
+}
+
+.sidebar.collapsed {
+    width: 56px;
+}
+
+.sidebar.collapsed .nav-label,
+.sidebar.collapsed .sidebar-title,
+.sidebar.collapsed .sidebar-hint {
+    display: none;
 }
 
 .sidebar-brand {
@@ -190,7 +201,6 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: background 0.15s;
 }
 
 .banner-close:hover {
@@ -226,7 +236,6 @@ body {
 .models-title {
     font-size: 14px;
     font-weight: 700;
-    color: var(--text);
 }
 
 .model-count {
@@ -301,7 +310,6 @@ body {
 .model-name {
     font-size: 13px;
     font-weight: 600;
-    color: var(--text);
 }
 
 .model-icon {
@@ -355,8 +363,8 @@ body {
     font-size: 13px;
     color: var(--text);
     cursor: pointer;
-    outline: none;
     min-width: 160px;
+    outline: none;
 }
 
 .judge-dropdown:focus {
@@ -364,25 +372,7 @@ body {
     box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.1);
 }
 
-.judge-mode-group {
-    display: flex;
-    gap: 12px;
-}
-
-.judge-mode-option {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    font-size: 12px;
-    color: var(--text-secondary);
-    cursor: pointer;
-}
-
-.judge-mode-option input[type="radio"] {
-    accent-color: var(--accent);
-}
-
-/* ── Settings ──────────────────────────────────────────────────── */
+/* ── Settings / History / Judge Detail ─────────────────────────── */
 
 .settings-content {
     max-width: 500px;
@@ -416,16 +406,12 @@ body {
     border-color: var(--accent);
 }
 
-/* ── Placeholder Text ──────────────────────────────────────────── */
-
 .placeholder-text {
     font-size: 14px;
     color: var(--text-muted);
     padding: 40px 0;
     text-align: center;
 }
-
-/* ── Judge Detail Card ─────────────────────────────────────────── */
 
 .judge-detail-card {
     max-width: 600px;
@@ -448,7 +434,115 @@ body {
     margin-bottom: 12px;
 }
 
-/* ── Prompt Bar (Bottom) ───────────────────────────────────────── */
+/* ══════════════════════════════════════════════════════════════════
+   SPLIT SCREEN — 5 iframes in one tab
+   Top row: 3 panels  |  Bottom row: 2 panels
+   ══════════════════════════════════════════════════════════════════ */
+
+.split-screen {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    position: relative;
+}
+
+.split-top-row {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.split-bottom-row {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+}
+
+.iframe-panel {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    border: 1px solid var(--border);
+    position: relative;
+    min-width: 0;
+    overflow: hidden;
+}
+
+.iframe-panel-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 12px;
+    background: #f1f3f5;
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.iframe-panel-icon {
+    font-size: 14px;
+}
+
+.iframe-panel-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.iframe-panel-badge {
+    font-size: 9px;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 10px;
+    margin-left: auto;
+}
+
+.iframe-panel-badge.council {
+    background: var(--accent-light);
+    color: var(--accent);
+}
+
+.iframe-panel-badge.judge {
+    background: #fef3c7;
+    color: #b45309;
+}
+
+.iframe-panel-status {
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 8px;
+}
+
+.iframe-panel iframe {
+    flex: 1;
+    width: 100%;
+    border: none;
+    background: white;
+}
+
+.iframe-panel-loading {
+    position: absolute;
+    inset: 0;
+    top: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg-secondary);
+    z-index: 2;
+}
+
+.iframe-panel-loading .spinner {
+    width: 28px;
+    height: 28px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+/* ── Prompt Bar (Bottom — always visible) ──────────────────────── */
 
 .prompt-bar {
     position: fixed;
@@ -457,16 +551,16 @@ body {
     right: 0;
     background: var(--bg);
     border-top: 1px solid var(--border);
-    padding: 12px 40px 16px;
+    padding: 8px 40px 12px;
     z-index: 100;
 }
 
 .prompt-bar-inner {
-    max-width: 800px;
+    max-width: 900px;
     margin: 0 auto;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 6px;
 }
 
 .prompt-templates {
@@ -482,7 +576,7 @@ body {
 }
 
 .template-tag {
-    padding: 4px 12px;
+    padding: 3px 10px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 20px;
@@ -498,12 +592,6 @@ body {
     background: var(--accent-light);
     color: var(--accent);
     border-color: var(--accent);
-}
-
-.template-edit {
-    font-size: 14px;
-    cursor: pointer;
-    margin-left: 4px;
 }
 
 .prompt-input-row {
@@ -544,7 +632,6 @@ body {
     cursor: pointer;
     padding: 4px;
     border-radius: 6px;
-    transition: color 0.15s;
     display: flex;
     align-items: center;
 }
@@ -560,15 +647,12 @@ body {
     border: none;
     background: var(--success);
     color: white;
-    font-family: var(--font);
-    font-size: 12px;
-    font-weight: 700;
     cursor: pointer;
     display: flex;
     align-items: center;
     justify-content: center;
-    transition: all 0.15s;
     flex-shrink: 0;
+    transition: all 0.15s;
 }
 
 .btn-send:hover:not(:disabled) {
@@ -579,6 +663,30 @@ body {
 .btn-send:disabled {
     opacity: 0.4;
     cursor: not-allowed;
+}
+
+/* ── Prompt Status ─────────────────────────────────────────────── */
+
+.prompt-status {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 0;
+}
+
+.prompt-status-spinner {
+    width: 14px;
+    height: 14px;
+    border: 2px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+.prompt-status-text {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-weight: 500;
 }
 
 /* ── Buttons ───────────────────────────────────────────────────── */
@@ -618,50 +726,25 @@ body {
     color: var(--text);
 }
 
-/* ── Status Overlay ────────────────────────────────────────────── */
-
-.status-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.4);
-    z-index: 200;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.status-card {
-    background: white;
-    border-radius: var(--radius-xl);
-    padding: 32px 40px;
-    text-align: center;
-    box-shadow: var(--shadow-lg);
-    min-width: 320px;
-}
-
-.status-spinner {
-    width: 36px;
-    height: 36px;
-    border: 3px solid var(--border);
-    border-top-color: var(--accent);
-    border-radius: 50%;
-    margin: 0 auto 16px;
-    animation: spin 0.8s linear infinite;
-}
-
-.status-text {
-    font-size: 14px;
-    font-weight: 600;
-    color: var(--text);
-    margin-bottom: 12px;
-}
-
-.status-models {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+.btn-back {
+    padding: 6px 14px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: var(--font);
     font-size: 12px;
+    font-weight: 600;
     color: var(--text-secondary);
+    cursor: pointer;
+    position: fixed;
+    top: 8px;
+    right: 16px;
+    z-index: 50;
+}
+
+.btn-back:hover {
+    background: var(--bg-card-hover);
+    color: var(--text);
 }
 
 /* ── Results Modal ─────────────────────────────────────────────── */
@@ -705,7 +788,6 @@ body {
     font-size: 18px;
     color: var(--text-muted);
     cursor: pointer;
-    padding: 4px;
 }
 
 .results-body {
@@ -756,7 +838,6 @@ body {
 .result-winner-name {
     font-size: 15px;
     font-weight: 700;
-    color: var(--text);
 }
 
 .result-score-card {
@@ -805,7 +886,6 @@ body {
 .result-criterion-score {
     font-size: 14px;
     font-weight: 700;
-    color: var(--text);
 }
 
 .result-justification {
@@ -817,8 +897,6 @@ body {
     padding-top: 8px;
 }
 
-/* ── Raw Response ──────────────────────────────────────────────── */
-
 .result-raw {
     background: var(--bg-input);
     border-radius: var(--radius);
@@ -828,7 +906,6 @@ body {
     word-break: break-word;
     max-height: 300px;
     overflow-y: auto;
-    color: var(--text);
     line-height: 1.5;
 }
 

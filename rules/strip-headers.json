@@ -1,0 +1,33 @@
+[
+    {
+        "id": 1,
+        "priority": 1,
+        "action": {
+            "type": "modifyHeaders",
+            "responseHeaders": [
+                {
+                    "header": "X-Frame-Options",
+                    "operation": "remove"
+                },
+                {
+                    "header": "Content-Security-Policy",
+                    "operation": "remove"
+                }
+            ]
+        },
+        "condition": {
+            "requestDomains": [
+                "chatgpt.com",
+                "chat.openai.com",
+                "gemini.google.com",
+                "perplexity.ai",
+                "www.perplexity.ai",
+                "grok.com",
+                "x.com"
+            ],
+            "resourceTypes": [
+                "sub_frame"
+            ]
+        }
+    }
+]
