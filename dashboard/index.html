@@ -1,0 +1,204 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Council</title>
+    <link rel="stylesheet" href="dashboard.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+
+<body>
+
+    <!-- Sidebar -->
+    <aside class="sidebar" id="sidebar">
+        <div class="sidebar-brand">
+            <img src="../icons/icon48.png" alt="LLM Council" class="sidebar-logo">
+            <span class="sidebar-title">LLM Council</span>
+        </div>
+
+        <nav class="sidebar-nav">
+            <a href="#" class="nav-item active" data-view="home">
+                <span class="nav-icon">🏠</span>
+                <span class="nav-label">Home</span>
+            </a>
+            <a href="#" class="nav-item" data-view="settings">
+                <span class="nav-icon">⚙️</span>
+                <span class="nav-label">Settings</span>
+            </a>
+            <a href="#" class="nav-item" data-view="history">
+                <span class="nav-icon">📜</span>
+                <span class="nav-label">History</span>
+            </a>
+            <a href="#" class="nav-item" data-view="judge">
+                <span class="nav-icon">⚖️</span>
+                <span class="nav-label">Judge Config</span>
+            </a>
+        </nav>
+
+        <div class="sidebar-footer">
+            <span class="sidebar-hint">No saved prompts yet</span>
+        </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+
+        <!-- Home View -->
+        <div class="view active" id="view-home">
+
+            <!-- Header Banner -->
+            <div class="banner" id="banner">
+                <span class="banner-icon">📌</span>
+                <div class="banner-text">
+                    <strong>Pin the extension for quick access</strong>
+                    <span>Click the puzzle icon in the toolbar → Find "LLM Council" → Click the pin icon</span>
+                </div>
+                <button class="banner-close" id="banner-close">✕</button>
+            </div>
+
+            <!-- Title -->
+            <h1 class="page-title">AI Compare</h1>
+
+            <!-- AI Sites Grid -->
+            <section class="models-section">
+                <div class="models-header">
+                    <h2 class="models-title">AI sites</h2>
+                    <div class="models-actions">
+                        <span class="model-count" id="model-count">0 selected</span>
+                    </div>
+                </div>
+
+                <div class="models-grid" id="models-grid">
+                    <!-- Row 1: Main models -->
+                    <!-- Populated by JS -->
+                </div>
+            </section>
+
+            <!-- Judge Section -->
+            <section class="judge-section">
+                <div class="judge-header">
+                    <h2 class="judge-title">⚖️ Judge Model</h2>
+                    <span class="judge-badge" id="judge-badge">Gemini</span>
+                </div>
+                <div class="judge-config">
+                    <select id="judge-select" class="judge-dropdown">
+                        <!-- Populated by JS -->
+                    </select>
+                    <div class="judge-mode-group">
+                        <label class="judge-mode-option">
+                            <input type="radio" name="judge-mode" value="same-session">
+                            <span>Same session</span>
+                        </label>
+                        <label class="judge-mode-option">
+                            <input type="radio" name="judge-mode" value="incognito" checked>
+                            <span>Incognito</span>
+                        </label>
+                        <label class="judge-mode-option">
+                            <input type="radio" name="judge-mode" value="separate-window">
+                            <span>Separate window</span>
+                        </label>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <!-- Settings View (hidden by default) -->
+        <div class="view" id="view-settings">
+            <h1 class="page-title">Settings</h1>
+            <div class="settings-content">
+                <div class="setting-row">
+                    <label>Council Timeout (seconds)</label>
+                    <input type="number" id="setting-timeout" value="120" min="30" max="300" class="setting-input">
+                </div>
+                <div class="setting-row">
+                    <label>Injection Delay (ms)</label>
+                    <input type="number" id="setting-delay" value="1500" min="500" max="5000" class="setting-input">
+                </div>
+            </div>
+        </div>
+
+        <!-- History View (hidden by default) -->
+        <div class="view" id="view-history">
+            <h1 class="page-title">History</h1>
+            <p class="placeholder-text">No previous queries yet. Your prompt history will appear here.</p>
+        </div>
+
+        <!-- Judge Config View (hidden by default) -->
+        <div class="view" id="view-judge">
+            <h1 class="page-title">Judge Configuration</h1>
+            <div class="judge-detail-card">
+                <h3>How the Judge Works</h3>
+                <p>After all council models respond, the Judge automatically evaluates each response on 5 criteria:
+                    Accuracy, Depth, Clarity, Reasoning, and Relevance (1–10 each).</p>
+                <p>The Judge can run in an <strong>isolated session</strong> (incognito or separate window) so you can
+                    use a different account.</p>
+                <button class="btn btn-outline" id="btn-reauth">🔄 Re-authenticate Judge Account</button>
+            </div>
+        </div>
+
+        <!-- Bottom Prompt Bar -->
+        <div class="prompt-bar" id="prompt-bar">
+            <div class="prompt-bar-inner">
+                <div class="prompt-templates">
+                    <span class="template-label">Template:</span>
+                    <button class="template-tag"
+                        data-template="Compare these models' responses objectively.">Compare</button>
+                    <button class="template-tag"
+                        data-template="Explain this topic in detail with examples.">Explain</button>
+                    <button class="template-tag"
+                        data-template="Analyze the pros and cons of this approach.">Analyze</button>
+                    <span class="template-edit">✏️</span>
+                </div>
+                <div class="prompt-input-row">
+                    <input type="text" id="prompt-input" class="prompt-input" placeholder="Enter content to search..."
+                        autocomplete="off">
+                    <button class="btn-attach" id="btn-attach" title="Attach file">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                            stroke-width="2">
+                            <path
+                                d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                        </svg>
+                    </button>
+                    <button class="btn-send" id="btn-send" disabled>
+                        <span>PK</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Status Overlay (appears during pipeline execution) -->
+    <div class="status-overlay" id="status-overlay" style="display: none;">
+        <div class="status-card">
+            <div class="status-spinner"></div>
+            <p class="status-text" id="status-text">Sending prompt to council...</p>
+            <div class="status-models" id="status-models"></div>
+        </div>
+    </div>
+
+    <!-- Results Modal (appears when judge finishes) -->
+    <div class="results-modal" id="results-modal" style="display: none;">
+        <div class="results-card">
+            <div class="results-header">
+                <h2>📊 Judge Evaluation</h2>
+                <button class="results-close" id="results-close">✕</button>
+            </div>
+            <div class="results-body" id="results-body">
+                <!-- Populated by JS -->
+            </div>
+            <div class="results-footer">
+                <button class="btn btn-outline" id="btn-copy-results">📋 Copy</button>
+                <button class="btn btn-primary" id="results-close-btn">Done</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="dashboard.js" type="module"></script>
+</body>
+
+</html>
