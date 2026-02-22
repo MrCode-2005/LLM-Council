@@ -1,19 +1,36 @@
 /**
  * LLM Council — Background Service Worker
  *
- * Orchestrates the entire council→judge pipeline:
- * 1. Opens/finds tabs for council models
- * 2. Injects prompts into council models
- * 3. Polls for response completion
- * 4. Builds evaluation prompt
- * 5. Opens judge in isolated context
- * 6. Injects evaluation prompt into judge
- * 7. Extracts and parses judge result
+ * Orchestrates:
+ * 1. Opens dashboard tab when extension icon is clicked
+ * 2. Opens tiled windows for council models + judge
+ * 3. Injects prompts into council models
+ * 4. Polls for response completion
+ * 5. Builds evaluation prompt & injects into judge
+ * 6. Parses judge result & sends to dashboard
  */
 
 import { MODELS, MSG, RESPONSE_STATUS, JUDGE_MODE, DEFAULTS, STORAGE_KEYS } from '../utils/constants.js';
 import { buildEvaluationPrompt } from '../judge/judge-engine.js';
 import { parseJudgeResponse } from '../judge/judge-parser.js';
+
+// ── Open Dashboard Tab on Icon Click ─────────────────────────────────────────
+
+chrome.action.onClicked.addListener(async () => {
+    // Check if dashboard tab already exists
+    const dashboardUrl = chrome.runtime.getURL('dashboard/index.html');
+    const tabs = await chrome.tabs.query({});
+    const existing = tabs.find(t => t.url?.startsWith(dashboardUrl));
+
+    if (existing) {
+        // Focus existing tab
+        await chrome.tabs.update(existing.id, { active: true });
+        await chrome.windows.update(existing.windowId, { focused: true });
+    } else {
+        // Open new tab
+        await chrome.tabs.create({ url: dashboardUrl });
+    }
+});
 
 // ── State ────────────────────────────────────────────────────────────────────
 
@@ -21,10 +38,11 @@ let councilState = {
     active: false,
     prompt: '',
     models: [],
-    responses: {},   // modelId → { tabId, status, response, modelName }
+    responses: {},
     judgeModelId: null,
     judgeTabId: null,
-    judgeWindowId: null
+    judgeWindowId: null,
+    councilWindows: []   // track opened windows for tiling
 };
 
 // ── Message Router ───────────────────────────────────────────────────────────
@@ -57,7 +75,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 async function handleAskCouncil(message, sendResponse) {
     const { prompt, councilModels, judgeModel, judgeMode } = message;
 
-    // Reset state
     councilState = {
         active: true,
         prompt,
@@ -65,64 +82,174 @@ async function handleAskCouncil(message, sendResponse) {
         responses: {},
         judgeModelId: judgeModel,
         judgeTabId: null,
-        judgeWindowId: null
+        judgeWindowId: null,
+        councilWindows: []
     };
 
-    // Initialize response tracking
     for (const modelId of councilModels) {
         councilState.responses[modelId] = {
             tabId: null,
+            windowId: null,
             status: RESPONSE_STATUS.PENDING,
             response: null,
             modelName: MODELS[modelId]?.name || modelId
         };
     }
 
-    sendResponse({ success: true, message: 'Council pipeline started' });
-    broadcastStatus('Council pipeline started. Opening model tabs...');
+    sendResponse({ success: true, message: 'Pipeline started' });
+    broadcastStatus('Opening AI sites in tiled windows...');
 
     try {
-        // Step 1: Open/find tabs for each council model (NOT judge!)
-        await openCouncilTabs(councilModels);
+        // Step 1: Get screen dimensions and compute tiling layout
+        const screenInfo = await getScreenDimensions();
+        const totalWindows = councilModels.length + 1; // councils + judge
+        const tiles = computeTileLayout(screenInfo, totalWindows);
 
-        // Step 2: Inject prompts with delay between each
-        await injectPromptsSequentially(prompt, councilModels);
+        // Step 2: Open council windows (tiled)
+        for (let i = 0; i < councilModels.length; i++) {
+            const modelId = councilModels[i];
+            const model = MODELS[modelId];
+            if (!model) continue;
 
-        // Step 3: Poll for all responses
+            const tile = tiles[i];
+            try {
+                const win = await chrome.windows.create({
+                    url: model.url,
+                    left: tile.left,
+                    top: tile.top,
+                    width: tile.width,
+                    height: tile.height,
+                    focused: false,
+                    type: 'normal'
+                });
+                councilState.responses[modelId].tabId = win.tabs[0].id;
+                councilState.responses[modelId].windowId = win.id;
+                councilState.councilWindows.push(win.id);
+            } catch (e) {
+                console.error(`[LLM Council] Failed to open ${modelId}:`, e);
+                councilState.responses[modelId].status = RESPONSE_STATUS.FAILED;
+            }
+        }
+
+        // Step 3: Open judge window (last tile position)
+        const judgeTile = tiles[councilModels.length]; // last tile
+        const judgeModel_info = MODELS[judgeModel];
+
+        if (judgeModel_info) {
+            const isIncognito = judgeMode === JUDGE_MODE.INCOGNITO;
+            try {
+                const judgeWin = await chrome.windows.create({
+                    url: judgeModel_info.url,
+                    left: judgeTile.left,
+                    top: judgeTile.top,
+                    width: judgeTile.width,
+                    height: judgeTile.height,
+                    focused: false,
+                    incognito: isIncognito,
+                    type: 'normal'
+                });
+                councilState.judgeTabId = judgeWin.tabs[0].id;
+                councilState.judgeWindowId = judgeWin.id;
+            } catch (e) {
+                console.error('[LLM Council] Failed to open judge:', e);
+                // Fallback: open without incognito
+                const judgeWin = await chrome.windows.create({
+                    url: judgeModel_info.url,
+                    left: judgeTile.left,
+                    top: judgeTile.top,
+                    width: judgeTile.width,
+                    height: judgeTile.height,
+                    focused: false,
+                    type: 'normal'
+                });
+                councilState.judgeTabId = judgeWin.tabs[0].id;
+                councilState.judgeWindowId = judgeWin.id;
+            }
+        }
+
+        broadcastStatus('Waiting for pages to load...');
+
+        // Step 4: Wait for all council tabs to load
+        for (const modelId of councilModels) {
+            const state = councilState.responses[modelId];
+            if (state.status === RESPONSE_STATUS.FAILED || !state.tabId) continue;
+            try {
+                await waitForTabLoad(state.tabId);
+            } catch (e) {
+                console.warn(`[LLM Council] Tab load timeout for ${modelId}`);
+            }
+        }
+
+        // Wait for judge tab too
+        if (councilState.judgeTabId) {
+            try { await waitForTabLoad(councilState.judgeTabId); } catch (e) { }
+        }
+
+        // Step 5: Inject prompts into council models sequentially
+        broadcastStatus('Injecting prompt into council models...');
+
+        for (const modelId of councilModels) {
+            const state = councilState.responses[modelId];
+            if (state.status === RESPONSE_STATUS.FAILED || !state.tabId) continue;
+
+            state.status = RESPONSE_STATUS.INJECTING;
+            broadcastStatus(`Sending to ${state.modelName}...`);
+
+            try {
+                await injectIntoTab(state.tabId, prompt);
+                state.status = RESPONSE_STATUS.WAITING;
+            } catch (e) {
+                console.error(`[LLM Council] Injection failed for ${modelId}:`, e);
+                state.status = RESPONSE_STATUS.FAILED;
+            }
+
+            // Delay between injections
+            if (councilModels.indexOf(modelId) < councilModels.length - 1) {
+                await delay(DEFAULTS.INJECTION_DELAY_MS);
+            }
+        }
+
+        // Step 6: Poll for all responses
+        broadcastStatus('Waiting for council responses...');
         await waitForAllResponses(councilModels);
 
-        // Step 4: Build evaluation prompt
+        // Step 7: Build evaluation prompt
         const responsesArray = councilModels.map(id => councilState.responses[id]);
         const completedResponses = responsesArray.filter(r => r.status === RESPONSE_STATUS.COMPLETE);
 
         if (completedResponses.length === 0) {
-            broadcastStatus('All council models failed. Cannot invoke Judge.');
+            broadcastStatus('All council models failed.');
             broadcastError('No council responses received. Judge evaluation skipped.');
             councilState.active = false;
             return;
         }
 
         const evalPrompt = buildEvaluationPrompt(prompt, responsesArray);
-        broadcastStatus('All responses collected. Invoking Judge...');
+        broadcastStatus('Sending evaluation to Judge...');
 
-        // Step 5: Open judge in isolated context
-        const judgeTabId = await openJudgeTab(councilState.judgeModelId, judgeMode);
-        councilState.judgeTabId = judgeTabId;
+        // Step 8: Inject evaluation prompt into judge
+        if (councilState.judgeTabId) {
+            await injectIntoTab(councilState.judgeTabId, evalPrompt);
 
-        // Step 6: Inject evaluation prompt into judge
-        await injectIntoTab(judgeTabId, evalPrompt);
-        broadcastStatus('Evaluation prompt sent to Judge. Waiting for verdict...');
+            // Focus judge window
+            if (councilState.judgeWindowId) {
+                await chrome.windows.update(councilState.judgeWindowId, { focused: true });
+            }
 
-        // Step 7: Wait for judge response
-        const judgeResponse = await pollForResponse(judgeTabId, DEFAULTS.JUDGE_TIMEOUT_MS);
+            broadcastStatus('Waiting for Judge verdict...');
 
-        // Step 8: Parse judge response
-        const modelNames = completedResponses.map(r => r.modelName);
-        const judgeResult = parseJudgeResponse(judgeResponse, modelNames);
+            // Step 9: Wait for judge response
+            const judgeResponse = await pollForResponse(councilState.judgeTabId, DEFAULTS.JUDGE_TIMEOUT_MS);
 
-        // Step 9: Send results
-        broadcastResult(judgeResult);
-        broadcastStatus('Evaluation complete!');
+            // Step 10: Parse and send results
+            const modelNames = completedResponses.map(r => r.modelName);
+            const judgeResult = parseJudgeResponse(judgeResponse, modelNames);
+
+            broadcastResult(judgeResult);
+            broadcastStatus('Evaluation complete!');
+        } else {
+            broadcastError('Judge tab could not be opened.');
+        }
 
     } catch (error) {
         console.error('[LLM Council] Pipeline error:', error);
@@ -132,39 +259,101 @@ async function handleAskCouncil(message, sendResponse) {
     }
 }
 
-// ── Tab Management ───────────────────────────────────────────────────────────
+// ── Screen & Tiling ──────────────────────────────────────────────────────────
 
-async function openCouncilTabs(modelIds) {
-    for (const modelId of modelIds) {
-        const model = MODELS[modelId];
-        if (!model) continue;
-
+async function getScreenDimensions() {
+    return new Promise((resolve) => {
         try {
-            // Look for existing tab
-            const existingTab = await findTabForModel(model);
-
-            if (existingTab) {
-                councilState.responses[modelId].tabId = existingTab.id;
-            } else {
-                // Open new tab
-                const tab = await chrome.tabs.create({ url: model.url, active: false });
-                councilState.responses[modelId].tabId = tab.id;
-                // Wait for the tab to load
-                await waitForTabLoad(tab.id);
-            }
+            chrome.system.display.getInfo((displays) => {
+                if (displays && displays.length > 0) {
+                    const primary = displays[0];
+                    resolve({
+                        width: primary.workArea.width,
+                        height: primary.workArea.height,
+                        left: primary.workArea.left,
+                        top: primary.workArea.top
+                    });
+                } else {
+                    resolve({ width: 1920, height: 1080, left: 0, top: 0 });
+                }
+            });
         } catch (e) {
-            console.error(`[LLM Council] Failed to open tab for ${modelId}:`, e);
-            councilState.responses[modelId].status = RESPONSE_STATUS.FAILED;
+            resolve({ width: 1920, height: 1080, left: 0, top: 0 });
+        }
+    });
+}
+
+/**
+ * Compute tiling positions for N windows.
+ *
+ * Layouts:
+ *   2 windows → 2 columns
+ *   3 windows → 3 columns
+ *   4 windows → 2×2 grid
+ *   5 windows → top row: 3, bottom row: 2
+ */
+function computeTileLayout(screen, count) {
+    const tiles = [];
+    const { width, height, left, top } = screen;
+
+    if (count <= 3) {
+        // Single row, N columns
+        const colWidth = Math.floor(width / count);
+        for (let i = 0; i < count; i++) {
+            tiles.push({
+                left: left + i * colWidth,
+                top: top,
+                width: colWidth,
+                height: height
+            });
+        }
+    } else if (count === 4) {
+        // 2×2 grid
+        const colWidth = Math.floor(width / 2);
+        const rowHeight = Math.floor(height / 2);
+        for (let row = 0; row < 2; row++) {
+            for (let col = 0; col < 2; col++) {
+                tiles.push({
+                    left: left + col * colWidth,
+                    top: top + row * rowHeight,
+                    width: colWidth,
+                    height: rowHeight
+                });
+            }
+        }
+    } else {
+        // 5 windows: top row 3, bottom row 2
+        const topCols = 3;
+        const bottomCols = 2;
+        const topWidth = Math.floor(width / topCols);
+        const bottomWidth = Math.floor(width / bottomCols);
+        const rowHeight = Math.floor(height / 2);
+
+        // Top row
+        for (let i = 0; i < topCols; i++) {
+            tiles.push({
+                left: left + i * topWidth,
+                top: top,
+                width: topWidth,
+                height: rowHeight
+            });
+        }
+
+        // Bottom row
+        for (let i = 0; i < bottomCols; i++) {
+            tiles.push({
+                left: left + i * bottomWidth,
+                top: top + rowHeight,
+                width: bottomWidth,
+                height: rowHeight
+            });
         }
     }
+
+    return tiles;
 }
 
-async function findTabForModel(model) {
-    const tabs = await chrome.tabs.query({});
-    return tabs.find(tab =>
-        model.matchPatterns.some(pattern => tab.url?.includes(pattern))
-    );
-}
+// ── Tab Management ───────────────────────────────────────────────────────────
 
 async function waitForTabLoad(tabId, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
@@ -177,7 +366,6 @@ async function waitForTabLoad(tabId, timeoutMs = 30000) {
             if (updatedTabId === tabId && changeInfo.status === 'complete') {
                 clearTimeout(timeout);
                 chrome.tabs.onUpdated.removeListener(listener);
-                // Additional delay for JS frameworks to initialize
                 setTimeout(resolve, 2000);
             }
         };
@@ -186,92 +374,22 @@ async function waitForTabLoad(tabId, timeoutMs = 30000) {
     });
 }
 
-async function openJudgeTab(judgeModelId, judgeMode) {
-    const model = MODELS[judgeModelId];
-    if (!model) throw new Error(`Unknown judge model: ${judgeModelId}`);
-
-    const mode = judgeMode || JUDGE_MODE.INCOGNITO;
-
-    if (mode === JUDGE_MODE.INCOGNITO) {
-        // Open in incognito window
-        const window = await chrome.windows.create({
-            url: model.url,
-            incognito: true,
-            focused: false
-        });
-        councilState.judgeWindowId = window.id;
-        const tabId = window.tabs[0].id;
-        await waitForTabLoad(tabId);
-        return tabId;
-    }
-
-    if (mode === JUDGE_MODE.SEPARATE_WINDOW) {
-        // Open in a separate normal window
-        const window = await chrome.windows.create({
-            url: model.url,
-            focused: false
-        });
-        councilState.judgeWindowId = window.id;
-        const tabId = window.tabs[0].id;
-        await waitForTabLoad(tabId);
-        return tabId;
-    }
-
-    // Same session — just open a new tab (or find existing)
-    const existingTab = await findTabForModel(model);
-    if (existingTab) return existingTab.id;
-
-    const tab = await chrome.tabs.create({ url: model.url, active: false });
-    await waitForTabLoad(tab.id);
-    return tab.id;
-}
-
 // ── Prompt Injection ─────────────────────────────────────────────────────────
 
-async function injectPromptsSequentially(prompt, modelIds) {
-    for (const modelId of modelIds) {
-        const state = councilState.responses[modelId];
-        if (state.status === RESPONSE_STATUS.FAILED) continue;
-
-        state.status = RESPONSE_STATUS.INJECTING;
-        broadcastStatus(`Injecting prompt into ${state.modelName}...`);
-
-        try {
-            await injectIntoTab(state.tabId, prompt);
-            state.status = RESPONSE_STATUS.WAITING;
-        } catch (e) {
-            console.error(`[LLM Council] Injection failed for ${modelId}:`, e);
-            state.status = RESPONSE_STATUS.FAILED;
-        }
-
-        // Delay between injections to avoid overwhelming
-        if (modelIds.indexOf(modelId) < modelIds.length - 1) {
-            await delay(DEFAULTS.INJECTION_DELAY_MS);
-        }
-    }
-}
-
 async function injectIntoTab(tabId, prompt) {
-    // Ensure content script is injected
     try {
         await chrome.scripting.executeScript({
             target: { tabId },
             files: ['content-scripts/injector.js']
         });
     } catch (e) {
-        // Script might already be loaded — that's fine
         console.log('[LLM Council] Script injection note:', e.message);
     }
 
-    // Wait a moment for script init
     await delay(500);
 
-    // Send the prompt
     return new Promise((resolve, reject) => {
-        chrome.tabs.sendMessage(tabId, {
-            type: 'INJECT_PROMPT',
-            prompt
-        }, (response) => {
+        chrome.tabs.sendMessage(tabId, { type: 'INJECT_PROMPT', prompt }, (response) => {
             if (chrome.runtime.lastError) {
                 reject(new Error(chrome.runtime.lastError.message));
             } else if (response?.success) {
@@ -291,45 +409,31 @@ async function waitForAllResponses(modelIds) {
         councilState.responses[id].status === RESPONSE_STATUS.WAITING
     );
 
-    broadcastStatus(`Waiting for ${activeModels.length} council responses...`);
-
     while (true) {
-        let allDone = true;
-
         for (const modelId of activeModels) {
             const state = councilState.responses[modelId];
             if (state.status !== RESPONSE_STATUS.WAITING) continue;
 
-            allDone = false;
-
-            // Check timeout
             if (Date.now() - startTime > DEFAULTS.COUNCIL_TIMEOUT_MS) {
                 state.status = RESPONSE_STATUS.TIMEOUT;
-                state.response = null;
                 continue;
             }
 
-            // Poll the tab
             try {
                 const result = await pollTab(state.tabId);
                 if (result.complete) {
                     state.status = RESPONSE_STATUS.COMPLETE;
                     state.response = result.response;
-                    broadcastStatus(`${state.modelName} responded! Waiting for others...`);
+                    broadcastStatus(`${state.modelName} responded!`);
                 }
-            } catch (e) {
-                console.error(`[LLM Council] Poll error for ${modelId}:`, e);
-                // Don't fail immediately — retry on next poll
-            }
+            } catch (e) { /* retry next poll */ }
         }
 
-        // Check if all are done
         const remaining = activeModels.filter(id =>
             councilState.responses[id].status === RESPONSE_STATUS.WAITING
         );
         if (remaining.length === 0) break;
 
-        // Check overall timeout
         if (Date.now() - startTime > DEFAULTS.COUNCIL_TIMEOUT_MS) {
             for (const id of remaining) {
                 councilState.responses[id].status = RESPONSE_STATUS.TIMEOUT;
@@ -339,40 +443,25 @@ async function waitForAllResponses(modelIds) {
 
         await delay(DEFAULTS.POLL_INTERVAL_MS);
     }
-
-    // Summary
-    const complete = activeModels.filter(id => councilState.responses[id].status === RESPONSE_STATUS.COMPLETE);
-    const failed = activeModels.filter(id => councilState.responses[id].status !== RESPONSE_STATUS.COMPLETE);
-
-    broadcastStatus(`${complete.length} responses received. ${failed.length} failed/timed out.`);
 }
 
 async function pollForResponse(tabId, timeoutMs) {
     const start = Date.now();
-
     while (Date.now() - start < timeoutMs) {
         try {
             const result = await pollTab(tabId);
-            if (result.complete && result.response) {
-                return result.response;
-            }
-        } catch (e) {
-            console.warn('[LLM Council] Judge poll error:', e.message);
-        }
+            if (result.complete && result.response) return result.response;
+        } catch (e) { }
         await delay(DEFAULTS.POLL_INTERVAL_MS);
     }
-
     throw new Error('Judge response timeout');
 }
 
 function pollTab(tabId) {
     return new Promise((resolve, reject) => {
         chrome.tabs.sendMessage(tabId, { type: 'EXTRACT_RESPONSE' }, (response) => {
-            if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-            } else {
-                resolve(response || { complete: false, response: '' });
-            }
+            if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
+            else resolve(response || { complete: false, response: '' });
         });
     });
 }
@@ -381,73 +470,46 @@ function pollTab(tabId) {
 
 async function handleReauthJudge(sendResponse) {
     try {
-        // Close existing judge window
         if (councilState.judgeWindowId) {
-            try { await chrome.windows.remove(councilState.judgeWindowId); } catch (e) { /* ok */ }
+            try { await chrome.windows.remove(councilState.judgeWindowId); } catch (e) { }
         }
-
-        // Get judge config
         const config = await chrome.storage.local.get([STORAGE_KEYS.SELECTED_JUDGE, STORAGE_KEYS.JUDGE_ISOLATION_MODE]);
-        const judgeModelId = config[STORAGE_KEYS.SELECTED_JUDGE] || 'chatgpt';
-        const judgeMode = config[STORAGE_KEYS.JUDGE_ISOLATION_MODE] || JUDGE_MODE.INCOGNITO;
-
-        const tabId = await openJudgeTab(judgeModelId, judgeMode);
-        councilState.judgeTabId = tabId;
-
-        // Focus the judge window
-        if (councilState.judgeWindowId) {
-            await chrome.windows.update(councilState.judgeWindowId, { focused: true });
+        const judgeModelId = config[STORAGE_KEYS.SELECTED_JUDGE] || DEFAULTS.DEFAULT_JUDGE;
+        const model = MODELS[judgeModelId];
+        if (model) {
+            const isIncognito = config[STORAGE_KEYS.JUDGE_ISOLATION_MODE] === JUDGE_MODE.INCOGNITO;
+            const win = await chrome.windows.create({ url: model.url, incognito: isIncognito, focused: true });
+            councilState.judgeTabId = win.tabs[0].id;
+            councilState.judgeWindowId = win.id;
         }
-
         sendResponse({ success: true });
     } catch (e) {
         sendResponse({ success: false, error: e.message });
     }
 }
 
-// ── Broadcasting (Service Worker → Popup) ────────────────────────────────────
+// ── Broadcasting ─────────────────────────────────────────────────────────────
 
 function broadcastStatus(statusText) {
-    chrome.runtime.sendMessage({
-        type: MSG.STATUS_UPDATE,
-        status: statusText,
-        responses: councilState.responses
-    }).catch(() => { /* popup might be closed */ });
+    chrome.runtime.sendMessage({ type: MSG.STATUS_UPDATE, status: statusText, responses: councilState.responses }).catch(() => { });
 }
 
 function broadcastError(errorText) {
-    chrome.runtime.sendMessage({
-        type: MSG.ERROR,
-        error: errorText
-    }).catch(() => { });
+    chrome.runtime.sendMessage({ type: MSG.ERROR, error: errorText }).catch(() => { });
 }
 
 function broadcastResult(judgeResult) {
-    chrome.runtime.sendMessage({
-        type: MSG.JUDGE_RESULT,
-        result: judgeResult
-    }).catch(() => { });
+    chrome.runtime.sendMessage({ type: MSG.JUDGE_RESULT, result: judgeResult }).catch(() => { });
 }
 
 // ── Utilities ────────────────────────────────────────────────────────────────
 
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
+function delay(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
 
 // ── Keep-Alive ───────────────────────────────────────────────────────────────
 
-// MV3 service workers can go idle. Use alarms to keep alive during pipeline.
 chrome.alarms.onAlarm.addListener((alarm) => {
     if (alarm.name === 'council-keepalive' && councilState.active) {
         console.log('[LLM Council] Keep-alive ping');
     }
 });
-
-function startKeepAlive() {
-    chrome.alarms.create('council-keepalive', { periodInMinutes: 0.4 });
-}
-
-function stopKeepAlive() {
-    chrome.alarms.clear('council-keepalive');
-}
