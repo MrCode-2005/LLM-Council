@@ -12,11 +12,12 @@
 
 <body>
 
-    <!-- Sidebar -->
+    <!-- Sidebar (collapsible) -->
     <aside class="sidebar" id="sidebar">
         <div class="sidebar-brand">
             <img src="../icons/icon48.png" alt="LLM Council" class="sidebar-logo">
             <span class="sidebar-title">LLM Council</span>
+            <button class="sidebar-toggle" id="sidebar-toggle" title="Collapse sidebar">☰</button>
         </div>
 
         <nav class="sidebar-nav">
@@ -113,16 +114,11 @@
             </div>
         </div>
 
-        <!-- ═══ SPLIT SCREEN VIEW (shown after prompt submit) ═══ -->
+        <!-- ═══ SPLIT SCREEN — side by side resizable panels ═══ -->
         <div class="split-screen" id="split-screen" style="display: none;">
-            <div class="split-top-row" id="split-top-row">
-                <!-- 3 iframes top row — populated by JS -->
+            <div class="split-panels" id="split-panels">
+                <!-- Panels + resize handles populated by JS -->
             </div>
-            <div class="split-bottom-row" id="split-bottom-row">
-                <!-- 2 iframes bottom row — populated by JS -->
-            </div>
-            <!-- Labels overlay -->
-            <div class="iframe-labels" id="iframe-labels"></div>
         </div>
 
     </main>
