@@ -21,6 +21,7 @@ const judgeSelect = document.getElementById('judge-select');
 const judgeBadge = document.getElementById('judge-badge');
 const promptInput = document.getElementById('prompt-input');
 const btnSend = document.getElementById('btn-send');
+const btnAttach = document.getElementById('btn-attach');
 const bannerClose = document.getElementById('banner-close');
 const banner = document.getElementById('banner');
 
@@ -43,7 +44,7 @@ const btnCopyResults = document.getElementById('btn-copy-results');
 let selectedCouncil = new Set();
 let selectedJudge = DEFAULTS.DEFAULT_JUDGE;
 let lastResult = null;
-let iframePanels = {};  // modelId -> { iframe, frameId, panelEl, status }
+let iframePanels = {};  // panelKey -> { iframe, frameId, panelEl, url, role, modelId }
 let currentTabId = null;
 
 // ── Initialize ───────────────────────────────────────────────────────────────
@@ -56,6 +57,7 @@ async function init() {
     setupEventListeners();
     setupSidebarNav();
     updateUI();
+    console.log('[LLM Council] Dashboard initialized. Tab ID:', currentTabId);
 }
 
 async function getCurrentTabId() {
@@ -152,8 +154,6 @@ function setupSidebarNav() {
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
             const target = document.getElementById(`view-${viewName}`);
             if (target) target.classList.add('active');
-
-            // Hide split screen when navigating to a view
             splitScreen.style.display = 'none';
         });
     });
@@ -172,6 +172,46 @@ function setupEventListeners() {
     });
 
     btnSend.addEventListener('click', handleSubmit);
+
+    // File upload
+    if (btnAttach) {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = 'image/*,.pdf,.txt,.md,.csv,.json';
+        fileInput.style.display = 'none';
+        fileInput.multiple = true;
+        document.body.appendChild(fileInput);
+
+        btnAttach.addEventListener('click', () => fileInput.click());
+
+        fileInput.addEventListener('change', (e) => {
+            const files = [...e.target.files];
+            if (files.length === 0) return;
+
+            const names = files.map(f => f.name).join(', ');
+            const currentPrompt = promptInput.value.trim();
+            promptInput.value = currentPrompt
+                ? `${currentPrompt}\n\n[Attached: ${names}]`
+                : `[Attached: ${names}]`;
+            promptInput.focus();
+            updateUI();
+
+            // Read file contents for text files
+            files.forEach(file => {
+                if (file.type.startsWith('text/') || file.name.endsWith('.md') || file.name.endsWith('.json') || file.name.endsWith('.csv')) {
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                        const content = ev.target.result;
+                        promptInput.value += `\n\n--- ${file.name} ---\n${content}`;
+                        updateUI();
+                    };
+                    reader.readAsText(file);
+                }
+            });
+
+            fileInput.value = ''; // reset
+        });
+    }
 
     judgeSelect.addEventListener('change', () => {
         selectedJudge = judgeSelect.value;
@@ -219,16 +259,21 @@ async function handleSubmit() {
         { id: selectedJudge, role: 'judge' }
     ];
 
-    // Create iframe panels
+    // Create iframe panels (NO sandbox attribute)
     createIframePanels(panels);
 
     // Wait for iframes to load
     showStatus('Waiting for sites to load...');
     await waitForIframeLoads(panels);
 
-    // Discover frame IDs
+    // Discover frame IDs (with retry)
     showStatus('Connecting to AI sites...');
     await discoverFrameIds();
+
+    // Log frame discovery results
+    for (const [key, panel] of Object.entries(iframePanels)) {
+        console.log(`[LLM Council] Panel ${key}: frameId=${panel.frameId}, url=${panel.url}`);
+    }
 
     // Inject prompt into council iframes
     showStatus('Sending prompt to council...');
@@ -237,28 +282,33 @@ async function handleSubmit() {
     for (const councilId of councilIds) {
         const panel = iframePanels[councilId];
         if (!panel || !panel.frameId) {
-            updatePanelStatus(councilId, '❌ No connection');
-            continue;
+            console.warn(`[LLM Council] No frameId for ${councilId}, retrying discovery...`);
+            await delay(2000);
+            await discoverFrameIds(); // retry once
+            if (!panel?.frameId) {
+                updatePanelStatus(councilId, '❌ No connection');
+                continue;
+            }
         }
 
         updatePanelStatus(councilId, '⏳ Injecting...');
         try {
-            await sendToFrame(panel.frameId, { type: 'INJECT_PROMPT', prompt });
+            await injectAndSend(panel.frameId, prompt);
             updatePanelStatus(councilId, '⏳ Waiting...');
         } catch (e) {
             console.error(`[LLM Council] Inject failed for ${councilId}:`, e);
             updatePanelStatus(councilId, '❌ Failed');
         }
 
-        // Small delay between injections
-        await delay(1000);
+        // Delay between injections to prevent race conditions
+        await delay(DEFAULTS.INJECTION_DELAY_MS);
     }
 
     // Poll for council responses
     showStatus('Waiting for council responses...');
-    await pollForCouncilResponses(councilIds, councilResponses, prompt);
+    await pollForCouncilResponses(councilIds, councilResponses);
 
-    // Build evaluation prompt from collected responses
+    // Build evaluation prompt
     const responsesArray = councilIds.map(id => ({
         modelName: MODELS[id]?.name || id,
         status: councilResponses[id] ? 'complete' : 'failed',
@@ -269,27 +319,27 @@ async function handleSubmit() {
 
     if (completedResponses.length === 0) {
         showStatus('All councils failed. No evaluation possible.');
-        hideStatusAfterDelay(3000);
+        hideStatusAfterDelay(5000);
         return;
     }
 
-    // Send evaluation prompt to judge
+    // Send evaluation to judge
+    const judgeKey = `judge-${selectedJudge}`;
+    const judgePanel = iframePanels[judgeKey];
     showStatus('Sending evaluation to Judge...');
-    const evalPrompt = buildEvaluationPrompt(prompt, responsesArray);
-    const judgePanel = iframePanels[`judge-${selectedJudge}`];
 
     if (judgePanel && judgePanel.frameId) {
-        updatePanelStatus(`judge-${selectedJudge}`, '⏳ Evaluating...');
+        const evalPrompt = buildEvaluationPrompt(prompt, responsesArray);
+        updatePanelStatus(judgeKey, '⏳ Evaluating...');
         try {
-            await sendToFrame(judgePanel.frameId, { type: 'INJECT_PROMPT', prompt: evalPrompt });
+            await injectAndSend(judgePanel.frameId, evalPrompt);
         } catch (e) {
             console.error('[LLM Council] Judge inject failed:', e);
-            updatePanelStatus(`judge-${selectedJudge}`, '❌ Failed');
+            updatePanelStatus(judgeKey, '❌ Failed');
             showStatus('Judge injection failed.');
             return;
         }
 
-        // Poll for judge response
         showStatus('Waiting for Judge verdict...');
         const judgeResponse = await pollFrameForResponse(judgePanel.frameId, DEFAULTS.JUDGE_TIMEOUT_MS);
 
@@ -297,12 +347,12 @@ async function handleSubmit() {
             const modelNames = completedResponses.map(r => r.modelName);
             const judgeResult = parseJudgeResponse(judgeResponse, modelNames);
             lastResult = judgeResult;
-            updatePanelStatus(`judge-${selectedJudge}`, '✅ Done');
+            updatePanelStatus(judgeKey, '✅ Done');
             showStatus('Evaluation complete!');
             hideStatusAfterDelay(2000);
             showResults(judgeResult);
         } else {
-            updatePanelStatus(`judge-${selectedJudge}`, '⏰ Timeout');
+            updatePanelStatus(judgeKey, '⏰ Timeout');
             showStatus('Judge timed out.');
             hideStatusAfterDelay(3000);
         }
@@ -313,7 +363,7 @@ async function handleSubmit() {
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// IFRAME PANEL CREATION
+// IFRAME PANEL CREATION — NO SANDBOX
 // ══════════════════════════════════════════════════════════════════════════════
 
 function createIframePanels(panels) {
@@ -331,20 +381,12 @@ function createIframePanels(panels) {
         document.body.appendChild(backBtn);
     }
 
-    // Layout: top row gets first 3, bottom row gets rest
     const topCount = Math.min(3, panels.length);
     const topPanels = panels.slice(0, topCount);
     const bottomPanels = panels.slice(topCount);
 
-    topPanels.forEach(p => {
-        const el = createSinglePanel(p);
-        splitTopRow.appendChild(el);
-    });
-
-    bottomPanels.forEach(p => {
-        const el = createSinglePanel(p);
-        splitBottomRow.appendChild(el);
-    });
+    topPanels.forEach(p => splitTopRow.appendChild(createSinglePanel(p)));
+    bottomPanels.forEach(p => splitBottomRow.appendChild(createSinglePanel(p)));
 }
 
 function createSinglePanel({ id, role }) {
@@ -358,6 +400,7 @@ function createSinglePanel({ id, role }) {
     panel.className = 'iframe-panel';
     panel.id = `panel-${panelKey}`;
 
+    // NO sandbox attribute — let AI sites run freely
     panel.innerHTML = `
     <div class="iframe-panel-header">
       <span class="iframe-panel-icon">${icon}</span>
@@ -365,7 +408,7 @@ function createSinglePanel({ id, role }) {
       <span class="iframe-panel-badge ${role}">${role === 'judge' ? 'JUDGE' : 'COUNCIL'}</span>
       <span class="iframe-panel-status" id="status-${panelKey}">Loading...</span>
     </div>
-    <iframe src="${url}" id="iframe-${panelKey}" sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"></iframe>
+    <iframe src="${url}" id="iframe-${panelKey}" allow="clipboard-read; clipboard-write"></iframe>
     <div class="iframe-panel-loading" id="loading-${panelKey}">
       <div class="spinner"></div>
     </div>
@@ -384,6 +427,11 @@ function createSinglePanel({ id, role }) {
 }
 
 function goBackToHome() {
+    // Remove all iframes to free resources
+    splitTopRow.innerHTML = '';
+    splitBottomRow.innerHTML = '';
+    iframePanels = {};
+
     splitScreen.style.display = 'none';
     document.querySelectorAll('.nav-item').forEach(n => {
         n.classList.toggle('active', n.dataset.view === 'home');
@@ -403,18 +451,19 @@ async function waitForIframeLoads(panels) {
         const iframe = document.getElementById(`iframe-${panelKey}`);
 
         if (!iframe) return Promise.resolve();
-
         iframePanels[panelKey].iframe = iframe;
 
         return new Promise((resolve) => {
             const timeout = setTimeout(() => {
+                console.warn(`[LLM Council] Iframe load timeout for ${panelKey}`);
                 updatePanelStatus(panelKey, 'Loaded (timeout)');
                 hideLoading(panelKey);
                 resolve();
-            }, 20000);
+            }, 25000);
 
             iframe.addEventListener('load', () => {
                 clearTimeout(timeout);
+                console.log(`[LLM Council] Iframe loaded: ${panelKey}`);
                 updatePanelStatus(panelKey, 'Loaded');
                 hideLoading(panelKey);
                 resolve();
@@ -423,8 +472,8 @@ async function waitForIframeLoads(panels) {
     });
 
     await Promise.all(loadPromises);
-    // Extra wait for page JavaScript to settle
-    await delay(3000);
+    // Extra wait for page JS to settle (React hydration, etc.)
+    await delay(5000);
 }
 
 function hideLoading(panelKey) {
@@ -432,75 +481,147 @@ function hideLoading(panelKey) {
     if (loader) loader.style.display = 'none';
 }
 
+/**
+ * Discover frameIds by matching iframe URLs to panel URLs.
+ * Uses matchPatterns from MODELS for more reliable matching.
+ */
 async function discoverFrameIds() {
     if (!currentTabId) {
-        console.error('[LLM Council] No current tab ID');
+        console.error('[LLM Council] No current tab ID — cannot discover frames');
         return;
     }
 
-    const frames = await chrome.webNavigation.getAllFrames({ tabId: currentTabId });
-    if (!frames) return;
+    try {
+        const frames = await chrome.webNavigation.getAllFrames({ tabId: currentTabId });
+        if (!frames) {
+            console.error('[LLM Council] No frames returned');
+            return;
+        }
 
-    for (const frame of frames) {
-        if (frame.frameId === 0) continue; // skip main frame
+        console.log(`[LLM Council] Found ${frames.length} frames total`);
 
-        for (const [panelKey, panel] of Object.entries(iframePanels)) {
-            if (!panel.url) continue;
+        for (const frame of frames) {
+            if (frame.frameId === 0) continue; // skip main frame (our dashboard)
+            if (!frame.url || frame.url === 'about:blank') continue;
 
-            // Match by domain
-            try {
-                const panelDomain = new URL(panel.url).hostname;
-                const frameDomain = new URL(frame.url).hostname;
+            console.log(`[LLM Council] Frame ${frame.frameId}: ${frame.url}`);
 
-                if (frameDomain.includes(panelDomain) || panelDomain.includes(frameDomain)) {
+            for (const [panelKey, panel] of Object.entries(iframePanels)) {
+                if (panel.frameId) continue; // already discovered
+
+                const model = MODELS[panel.modelId];
+                if (!model) continue;
+
+                // Match using model's matchPatterns
+                const matchPatterns = model.matchPatterns || [];
+                const frameUrl = frame.url.toLowerCase();
+
+                let matched = false;
+                for (const pattern of matchPatterns) {
+                    if (frameUrl.includes(pattern.toLowerCase())) {
+                        matched = true;
+                        break;
+                    }
+                }
+
+                // Also try matching by panel URL domain
+                if (!matched) {
+                    try {
+                        const panelHost = new URL(panel.url).hostname;
+                        const frameHost = new URL(frame.url).hostname;
+                        if (frameHost === panelHost || frameHost.endsWith('.' + panelHost) || panelHost.endsWith('.' + frameHost)) {
+                            matched = true;
+                        }
+                    } catch (e) { /* ignore */ }
+                }
+
+                if (matched) {
                     panel.frameId = frame.frameId;
                     updatePanelStatus(panelKey, '🟢 Connected');
+                    console.log(`[LLM Council] ✓ Matched panel ${panelKey} → frame ${frame.frameId}`);
                     break;
                 }
-            } catch (e) { /* skip invalid URLs */ }
+            }
         }
+    } catch (e) {
+        console.error('[LLM Council] Frame discovery error:', e);
     }
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// MESSAGING WITH IFRAME CONTENT SCRIPTS
+// CONTENT SCRIPT INJECTION & MESSAGING
 // ══════════════════════════════════════════════════════════════════════════════
 
-async function sendToFrame(frameId, message) {
-    // First, ensure content script is injected
-    try {
-        await chrome.scripting.executeScript({
-            target: { tabId: currentTabId, frameIds: [frameId] },
-            files: ['content-scripts/injector.js']
-        });
-    } catch (e) {
-        console.log('[LLM Council] Script already injected or error:', e.message);
-    }
+/**
+ * Inject content script & send prompt to a frame.
+ * Retries injection up to 3 times with increasing delay.
+ */
+async function injectAndSend(frameId, prompt) {
+    const MAX_RETRIES = 3;
 
-    await delay(500);
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        // Try to inject the content script
+        try {
+            await chrome.scripting.executeScript({
+                target: { tabId: currentTabId, frameIds: [frameId] },
+                files: ['content-scripts/injector.js']
+            });
+            console.log(`[LLM Council] Content script injected into frame ${frameId} (attempt ${attempt})`);
+        } catch (e) {
+            console.warn(`[LLM Council] Script injection attempt ${attempt}: ${e.message}`);
+        }
 
-    return new Promise((resolve, reject) => {
-        chrome.tabs.sendMessage(currentTabId, message, { frameId }, (response) => {
-            if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
-            } else if (response?.success) {
-                resolve(response);
+        // Wait for script to initialize
+        await delay(1000 * attempt);
+
+        // Try to send the message
+        try {
+            const response = await sendMessageToFrame(frameId, { type: 'INJECT_PROMPT', prompt });
+            if (response?.success) {
+                console.log(`[LLM Council] ✓ Prompt sent to frame ${frameId}`);
+                return response;
             } else {
-                reject(new Error(response?.error || 'No response from frame'));
+                console.warn(`[LLM Council] Frame ${frameId} response:`, response);
+                if (attempt < MAX_RETRIES) continue;
+                throw new Error(response?.error || 'Injection returned failure');
             }
-        });
+        } catch (e) {
+            console.warn(`[LLM Council] Send attempt ${attempt} failed:`, e.message);
+            if (attempt === MAX_RETRIES) throw e;
+            await delay(2000);
+        }
+    }
+}
+
+function sendMessageToFrame(frameId, message) {
+    return new Promise((resolve, reject) => {
+        try {
+            chrome.tabs.sendMessage(currentTabId, message, { frameId }, (response) => {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                } else {
+                    resolve(response);
+                }
+            });
+        } catch (e) {
+            reject(e);
+        }
     });
 }
 
 async function extractFromFrame(frameId) {
     return new Promise((resolve) => {
-        chrome.tabs.sendMessage(currentTabId, { type: 'EXTRACT_RESPONSE' }, { frameId }, (response) => {
-            if (chrome.runtime.lastError) {
-                resolve({ complete: false, response: '' });
-            } else {
-                resolve(response || { complete: false, response: '' });
-            }
-        });
+        try {
+            chrome.tabs.sendMessage(currentTabId, { type: 'EXTRACT_RESPONSE' }, { frameId }, (response) => {
+                if (chrome.runtime.lastError) {
+                    resolve({ complete: false, response: '' });
+                } else {
+                    resolve(response || { complete: false, response: '' });
+                }
+            });
+        } catch (e) {
+            resolve({ complete: false, response: '' });
+        }
     });
 }
 
@@ -508,7 +629,7 @@ async function extractFromFrame(frameId) {
 // RESPONSE POLLING
 // ══════════════════════════════════════════════════════════════════════════════
 
-async function pollForCouncilResponses(councilIds, responses, prompt) {
+async function pollForCouncilResponses(councilIds, responses) {
     const startTime = Date.now();
     const pending = new Set(councilIds.filter(id => iframePanels[id]?.frameId));
 
@@ -534,7 +655,6 @@ async function pollForCouncilResponses(councilIds, responses, prompt) {
         if (pending.size > 0) await delay(DEFAULTS.POLL_INTERVAL_MS);
     }
 
-    // Mark timeouts
     for (const id of pending) {
         updatePanelStatus(id, '⏰ Timeout');
     }
