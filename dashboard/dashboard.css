@@ -920,10 +920,15 @@ body.sidebar-hidden .prompt-bar {
     background: white;
     border-radius: var(--radius-xl);
     width: 560px;
-    max-height: 80vh;
+    min-width: 360px;
+    min-height: 300px;
+    max-width: 95vw;
+    max-height: 95vh;
     display: flex;
     flex-direction: column;
     box-shadow: var(--shadow-lg);
+    resize: both;
+    overflow: auto;
 }
 
 .results-header {
@@ -1091,4 +1096,72 @@ body.sidebar-hidden .prompt-bar {
 
 ::-webkit-scrollbar-thumb:hover {
     background: #9ca3af;
+}
+
+/* ── Back to Task Button ───────────────────────────────────────── */
+
+.btn-back-to-task {
+    position: fixed;
+    bottom: calc(var(--prompt-bar-height) + 8px);
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 200;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 18px;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: white;
+    border: none;
+    border-radius: 24px;
+    font-family: var(--font);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    box-shadow: var(--shadow-lg);
+    transition: all 0.2s;
+    animation: slideUp 0.3s ease;
+}
+
+.btn-back-to-task:hover {
+    transform: translateX(-50%) scale(1.05);
+    box-shadow: 0 8px 25px rgba(79, 70, 229, 0.4);
+}
+
+.btn-back-to-task .pulse-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #22c55e;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        opacity: 1;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 0.6;
+        transform: scale(0.8);
+    }
+}
+
+@keyframes slideUp {
+    from {
+        opacity: 0;
+        transform: translateX(-50%) translateY(10px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(-50%) translateY(0);
+    }
+}
+
+.btn-back-to-task.hidden {
+    display: none;
 }

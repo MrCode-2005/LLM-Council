@@ -175,6 +175,9 @@ function updateUI() {
 
 // ── Sidebar Navigation ──────────────────────────────────────────────────────
 
+let backToTaskBtn = null;
+let taskIsRunning = false;
+
 function setupSidebarNav() {
     document.querySelectorAll('.nav-item').forEach(item => {
         item.addEventListener('click', (e) => {
@@ -185,9 +188,48 @@ function setupSidebarNav() {
             document.querySelectorAll('.view').forEach(vw => vw.classList.remove('active'));
             const target = document.getElementById(`view-${v}`);
             if (target) target.classList.add('active');
-            splitScreen.style.display = 'none';
+
+            // Hide split screen but show "back to task" if a task is running
+            if (splitScreen.style.display === 'flex') {
+                splitScreen.style.display = 'none';
+                showBackToTaskButton();
+            }
         });
     });
+}
+
+function createBackToTaskButton() {
+    if (backToTaskBtn) return;
+    backToTaskBtn = document.createElement('button');
+    backToTaskBtn.className = 'btn-back-to-task hidden';
+    backToTaskBtn.innerHTML = `<span class="pulse-dot"></span> Back to Running Task`;
+    backToTaskBtn.addEventListener('click', returnToTask);
+    document.body.appendChild(backToTaskBtn);
+}
+
+function showBackToTaskButton() {
+    if (!backToTaskBtn) createBackToTaskButton();
+    // Only show if there are active panels
+    const activePanels = Object.values(iframePanels).filter(p => !p.failed);
+    if (activePanels.length > 0) {
+        backToTaskBtn.innerHTML = `<span class="pulse-dot"></span> Back to Running Task (${activePanels.length} models)`;
+        backToTaskBtn.classList.remove('hidden');
+        taskIsRunning = true;
+    }
+}
+
+function hideBackToTaskButton() {
+    if (backToTaskBtn) backToTaskBtn.classList.add('hidden');
+    taskIsRunning = false;
+}
+
+function returnToTask() {
+    // Hide all views, show split screen
+    document.querySelectorAll('.view').forEach(vw => vw.classList.remove('active'));
+    document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+    splitScreen.style.display = 'flex';
+    hideBackToTaskButton();
+    collapseSidebar();
 }
 
 // ── Event Listeners ──────────────────────────────────────────────────────────
@@ -564,6 +606,7 @@ function goBackToHome() {
     iframePanels = {};
     splitScreen.style.display = 'none';
     expandSidebar();
+    hideBackToTaskButton();
     document.querySelectorAll('.nav-item').forEach(n => n.classList.toggle('active', n.dataset.view === 'home'));
     document.getElementById('view-home').classList.add('active');
     document.querySelector('.btn-back')?.remove();
