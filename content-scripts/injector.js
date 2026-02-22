@@ -98,12 +98,24 @@
             match: () => /perplexity\.ai/.test(location.hostname),
 
             getInput: () =>
+                document.querySelector('div#ask-input') ||
+                document.querySelector('[role="textbox"]') ||
                 document.querySelector('textarea[placeholder*="Ask"]') ||
                 document.querySelector('textarea'),
 
             setPrompt: (el, text) => {
                 el.focus();
-                setNativeValue(el, text);
+                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                    setNativeValue(el, text);
+                } else {
+                    // contenteditable div
+                    el.textContent = '';
+                    document.execCommand('insertText', false, text);
+                    if (!el.textContent?.trim()) {
+                        el.innerHTML = `<p>${text}</p>`;
+                    }
+                    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
+                }
             },
 
             submit: () => {
@@ -111,6 +123,7 @@
                     document.querySelector('button.bg-super') ||
                     document.querySelector('button[type="submit"]');
                 if (btn && !btn.disabled) { btn.click(); return true; }
+                // Try Enter key as fallback
                 return false;
             },
 
@@ -131,18 +144,29 @@
             match: () => /grok\.com|x\.com\/i\/grok/.test(location.hostname + location.pathname),
 
             getInput: () =>
+                document.querySelector('textarea[aria-label*="Ask Grok"]') ||
+                document.querySelector('textarea[aria-label*="Ask"]') ||
                 document.querySelector('textarea[placeholder*="Ask"]') ||
                 document.querySelector('textarea') ||
                 document.querySelector('div[contenteditable="true"]'),
 
             setPrompt: (el, text) => {
                 el.focus();
-                setNativeValue(el, text);
+                if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                    setNativeValue(el, text);
+                } else {
+                    el.textContent = '';
+                    document.execCommand('insertText', false, text);
+                    if (!el.textContent?.trim()) {
+                        el.textContent = text;
+                    }
+                    el.dispatchEvent(new InputEvent('input', { bubbles: true, data: text }));
+                }
             },
 
             submit: () => {
-                const btn = document.querySelector('button[aria-label="Send"]') ||
-                    document.querySelector('button[aria-label="Submit"]') ||
+                const btn = document.querySelector('button[aria-label="Submit"]') ||
+                    document.querySelector('button[aria-label="Send"]') ||
                     document.querySelector('button[type="submit"]');
                 if (btn && !btn.disabled) { btn.click(); return true; }
                 return false;

@@ -556,7 +556,28 @@ body {
     font-weight: 700;
     padding: 1px 5px;
     border-radius: 10px;
+}
+
+.iframe-panel-close {
+    background: none;
+    border: none;
+    color: rgba(255, 255, 255, 0.4);
+    font-size: 13px;
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: 4px;
     margin-left: auto;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.iframe-panel-close:hover {
+    background: rgba(239, 68, 68, 0.3);
+    color: #fca5a5;
 }
 
 .iframe-panel-badge.council {

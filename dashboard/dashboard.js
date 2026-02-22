@@ -448,6 +448,7 @@ function createSinglePanel({ id, role }, flexBasis) {
     panel.className = 'iframe-panel';
     panel.id = `panel-${panelKey}`;
     panel.style.flex = `1 1 ${flexBasis}`;
+    panel.dataset.panelKey = panelKey;
 
     panel.innerHTML = `
     <div class="iframe-panel-header">
@@ -455,6 +456,7 @@ function createSinglePanel({ id, role }, flexBasis) {
       <span class="iframe-panel-name">${name}</span>
       <span class="iframe-panel-badge ${role}">${role === 'judge' ? 'JUDGE' : 'COUNCIL'}</span>
       <span class="iframe-panel-status" id="status-${panelKey}">Loading...</span>
+      <button class="iframe-panel-close" data-panel-key="${panelKey}" title="Close ${name}">✕</button>
     </div>
     <iframe src="${url}" id="iframe-${panelKey}" allow="clipboard-read; clipboard-write"></iframe>
     <div class="iframe-panel-loading" id="loading-${panelKey}">
@@ -462,12 +464,53 @@ function createSinglePanel({ id, role }, flexBasis) {
     </div>
   `;
 
+    // Close button handler
+    panel.querySelector('.iframe-panel-close').addEventListener('click', () => closePanel(panelKey));
+
     iframePanels[panelKey] = {
         iframe: null, frameId: null, panelEl: panel,
         url, role, modelId: id, failed: false,
     };
 
     return panel;
+}
+
+// ── Close Panel ──────────────────────────────────────────────────────────────
+
+function closePanel(panelKey) {
+    const panel = iframePanels[panelKey];
+    if (!panel) return;
+
+    // Mark as failed so polling skips it
+    panel.failed = true;
+    panel.frameId = null;
+
+    const panelEl = panel.panelEl;
+    if (!panelEl) return;
+
+    // Remove adjacent resize handle
+    const prevSibling = panelEl.previousElementSibling;
+    const nextSibling = panelEl.nextElementSibling;
+    if (prevSibling?.classList.contains('resize-handle')) {
+        prevSibling.remove();
+    } else if (nextSibling?.classList.contains('resize-handle')) {
+        nextSibling.remove();
+    }
+
+    // Remove the panel itself (this also kills the iframe)
+    panelEl.remove();
+    delete iframePanels[panelKey];
+
+    // Redistribute remaining panels equally
+    const remainingPanels = splitPanels.querySelectorAll('.iframe-panel');
+    if (remainingPanels.length === 0) {
+        goBackToHome();
+        return;
+    }
+    const newBasis = `${100 / remainingPanels.length}%`;
+    remainingPanels.forEach(p => { p.style.flex = `1 1 ${newBasis}`; });
+
+    console.log(`[LLM Council] Closed panel: ${panelKey}. ${remainingPanels.length} remaining.`);
 }
 
 // ── Resize Handle Logic ──────────────────────────────────────────────────────
