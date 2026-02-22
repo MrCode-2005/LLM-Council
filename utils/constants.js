@@ -101,5 +101,6 @@ export const STORAGE_KEYS = {
   SELECTED_COUNCIL: 'selectedCouncil',
   SELECTED_JUDGE: 'selectedJudge',
   JUDGE_ISOLATION_MODE: 'judgeIsolationMode',
+  JUDGE_CUSTOM_PROMPT: 'judgeCustomPrompt',
   LAST_PROMPT: 'lastPrompt'
 };

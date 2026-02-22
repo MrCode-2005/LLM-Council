@@ -10,7 +10,7 @@
  */
 
 import { MODELS, MSG, DEFAULTS, STORAGE_KEYS } from '../utils/constants.js';
-import { buildEvaluationPrompt } from '../judge/judge-engine.js';
+import { buildEvaluationPrompt, DEFAULT_JUDGE_PROMPT } from '../judge/judge-engine.js';
 import { parseJudgeResponse } from '../judge/judge-parser.js';
 
 // ── DOM References ───────────────────────────────────────────────────────────
@@ -45,6 +45,7 @@ const btnCopyResults = document.getElementById('btn-copy-results');
 
 let selectedCouncil = new Set();
 let selectedJudge = DEFAULTS.DEFAULT_JUDGE;
+let customJudgePrompt = '';
 let lastResult = null;
 let iframePanels = {};   // panelKey -> { iframe, frameId, panelEl, url, role, modelId, failed }
 let currentTabId = null;
@@ -61,6 +62,7 @@ async function init() {
     setupEventListeners();
     setupSidebarNav();
     setupSidebarToggle();
+    setupJudgePromptUI();
     updateUI();
     console.log('[LLM Council] Dashboard ready. Tab:', currentTabId);
 }
@@ -70,15 +72,55 @@ async function getCurrentTabId() {
 }
 
 async function loadConfig() {
-    const c = await chrome.storage.local.get([STORAGE_KEYS.SELECTED_COUNCIL, STORAGE_KEYS.SELECTED_JUDGE]);
+    const c = await chrome.storage.local.get([
+        STORAGE_KEYS.SELECTED_COUNCIL,
+        STORAGE_KEYS.SELECTED_JUDGE,
+        STORAGE_KEYS.JUDGE_CUSTOM_PROMPT
+    ]);
     if (c[STORAGE_KEYS.SELECTED_COUNCIL]) selectedCouncil = new Set(c[STORAGE_KEYS.SELECTED_COUNCIL]);
     if (c[STORAGE_KEYS.SELECTED_JUDGE]) selectedJudge = c[STORAGE_KEYS.SELECTED_JUDGE];
+    customJudgePrompt = c[STORAGE_KEYS.JUDGE_CUSTOM_PROMPT] || '';
 }
 
 async function saveConfig() {
     await chrome.storage.local.set({
         [STORAGE_KEYS.SELECTED_COUNCIL]: [...selectedCouncil],
         [STORAGE_KEYS.SELECTED_JUDGE]: selectedJudge,
+        [STORAGE_KEYS.JUDGE_CUSTOM_PROMPT]: customJudgePrompt,
+    });
+}
+
+// ── Judge Prompt UI ──────────────────────────────────────────────────────────
+
+function setupJudgePromptUI() {
+    const textarea = document.getElementById('judge-custom-prompt');
+    const btnSave = document.getElementById('btn-save-judge-prompt');
+    const btnReset = document.getElementById('btn-reset-judge-prompt');
+    const savedIndicator = document.getElementById('judge-prompt-saved');
+
+    if (!textarea) return;
+
+    // Pre-fill with saved custom prompt or default
+    textarea.value = customJudgePrompt || DEFAULT_JUDGE_PROMPT;
+
+    btnSave?.addEventListener('click', () => {
+        customJudgePrompt = textarea.value.trim();
+        saveConfig();
+        // Show save feedback
+        savedIndicator?.classList.remove('hidden');
+        setTimeout(() => savedIndicator?.classList.add('hidden'), 2000);
+    });
+
+    btnReset?.addEventListener('click', () => {
+        textarea.value = DEFAULT_JUDGE_PROMPT;
+        customJudgePrompt = '';
+        saveConfig();
+        savedIndicator?.classList.remove('hidden');
+        savedIndicator.textContent = '↺ Reset to default!';
+        setTimeout(() => {
+            savedIndicator?.classList.add('hidden');
+            savedIndicator.textContent = '✅ Saved!';
+        }, 2000);
     });
 }
 
@@ -409,7 +451,7 @@ async function handleSubmit() {
     }
 
     showStatus('Sending evaluation to Judge...');
-    const evalPrompt = buildEvaluationPrompt(prompt, responsesArray);
+    const evalPrompt = buildEvaluationPrompt(prompt, responsesArray, customJudgePrompt);
 
     try {
         await injectAndSend(judgePanel.frameId, evalPrompt);

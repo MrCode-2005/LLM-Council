@@ -108,9 +108,24 @@
             <h1 class="page-title">Judge Configuration</h1>
             <div class="judge-detail-card">
                 <h3>How the Judge Works</h3>
-                <p>After all council models respond, the Judge evaluates each response on 5 criteria: Accuracy, Depth,
-                    Clarity, Reasoning, and Relevance (1–10 each).</p>
-                <p>The Judge uses a separate iframe panel within the split-screen view.</p>
+                <p>After all council models respond, the Judge evaluates each response using the prompt below. You can
+                    customize this prompt to change how the Judge scores and ranks responses.</p>
+            </div>
+
+            <div class="judge-prompt-section">
+                <div class="judge-prompt-header">
+                    <label class="judge-prompt-label" for="judge-custom-prompt">✏️ Custom Judge Prompt</label>
+                    <div class="judge-prompt-actions">
+                        <button class="btn btn-outline btn-sm" id="btn-reset-judge-prompt">↺ Reset to Default</button>
+                        <button class="btn btn-primary btn-sm" id="btn-save-judge-prompt">💾 Save</button>
+                    </div>
+                </div>
+                <p class="judge-prompt-hint">Use <code>{question}</code> for the user's original question and
+                    <code>{responses}</code> for the council's answers. The Judge will follow this prompt to evaluate
+                    responses.</p>
+                <textarea id="judge-custom-prompt" class="judge-prompt-textarea"
+                    placeholder="Enter your custom Judge evaluation prompt..." rows="14"></textarea>
+                <span class="judge-prompt-saved hidden" id="judge-prompt-saved">✅ Saved!</span>
             </div>
         </div>
 
